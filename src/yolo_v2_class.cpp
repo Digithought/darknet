@@ -55,6 +55,14 @@ int detect_mat(const uint8_t* data, const size_t data_length, bbox_t_container &
 #endif    // OPENCV
 }
 
+int detect_tensor(const image_t data, float threshold, bbox_t_container &container)
+{
+    std::vector<bbox_t> detection = detector->detect(data, threshold);
+    for (size_t i = 0; i < detection.size() && i < C_SHARP_MAX_OBJECTS; ++i)
+        container.candidates[i] = detection[i];
+    return detection.size();
+}
+
 int dispose() {
     //if (detector != NULL) delete detector;
     //detector = NULL;

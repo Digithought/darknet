@@ -1,21 +1,23 @@
 ﻿using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Darknet
 {
-    public class YoloWrapper : IDisposable
+#pragma warning disable CA1063 // Implement IDisposable Correctly
+    public unsafe class YoloWrapper : IDisposable
+#pragma warning restore CA1063 // Implement IDisposable Correctly
     {
         private const string YoloLibraryName = "yolo_cpp_dll.dll";
         private const int MaxObjects = 1000;
 
+#pragma warning disable CA2101 // Specify marshaling for P/Invoke string arguments
         [DllImport(YoloLibraryName, EntryPoint = "init")]
+#pragma warning restore CA2101 // Specify marshaling for P/Invoke string arguments
         private static extern int InitializeYolo(string configurationFilename, string weightsFilename, int gpu);
 
-        [DllImport(YoloLibraryName, EntryPoint = "detect_image")]
-        private static extern int DetectImage(string filename, ref BboxContainer container);
-
-        [DllImport(YoloLibraryName, EntryPoint = "detect_mat")]
-        private static extern int DetectImage(IntPtr pArray, int nSize, ref BboxContainer container);
+        [DllImport(YoloLibraryName, EntryPoint = "detect_tensor")]
+        private static extern int DetectTensor(internal_image_t data, float threshold, ref BboxContainer container);
 
         [DllImport(YoloLibraryName, EntryPoint = "dispose")]
         private static extern int DisposeYolo();
@@ -38,52 +40,40 @@ namespace Darknet
             public bbox_t[] candidates;
         }
 
+        public struct image_t
+        {
+            public Int32 h, w, c;
+            public float[] data;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public unsafe struct internal_image_t
+        {
+            public Int32 h, w, c;
+            public float* data;
+        }
+
         public YoloWrapper(string configurationFilename, string weightsFilename, int gpu)
         {
             InitializeYolo(configurationFilename, weightsFilename, gpu);
         }
 
+#pragma warning disable CA1063 // Implement IDisposable Correctly
         public void Dispose()
+#pragma warning restore CA1063 // Implement IDisposable Correctly
         {
             DisposeYolo();
         }
 
-        public bbox_t[] Detect(string filename)
+        public bbox_t[] Detect(image_t data, float threshold)
         {
             var container = new BboxContainer();
-            var count = DetectImage(filename, ref container);
-
-            return container.candidates;
-        }
-
-        public bbox_t[] Detect(byte[] imageData)
-        {
-            var container = new BboxContainer();
-
-            var size = Marshal.SizeOf(imageData[0]) * imageData.Length;
-            var pnt = Marshal.AllocHGlobal(size);
-
-            try
+            fixed (float* pData = data.data)
             {
-                // Copy the array to unmanaged memory.
-                Marshal.Copy(imageData, 0, pnt, imageData.Length);
-                var count = DetectImage(pnt, imageData.Length, ref container);
-                if (count == -1)
-                {
-                    throw new NotSupportedException($"{YoloLibraryName} has no OpenCV support");
-                }
+                var internalData = new internal_image_t { w = data.w, h = data.h, c = data.c, data = pData };
+                var count = DetectTensor(internalData, threshold, ref container);
+                return container.candidates.Take(count).ToArray();
             }
-            catch (Exception exception)
-            {
-                return null;
-            }
-            finally
-            {
-                // Free the unmanaged memory.
-                Marshal.FreeHGlobal(pnt);
-            }
-
-            return container.candidates;
         }
     }
 }
